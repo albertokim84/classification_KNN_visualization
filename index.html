@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>KNN 분류 학습 시뮬레이터</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Pretendard', sans-serif;
+            background-color: #f8fafc;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #graph-canvas {
+            touch-action: none;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.02);
+            background-image: 
+                linear-gradient(to right, #f1f5f9 1px, transparent 1px),
+                linear-gradient(to bottom, #f1f5f9 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+        button:disabled, input:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="text-slate-800 flex flex-col h-screen overflow-hidden">
+
+    <header class="bg-white shadow-sm p-3 md:p-4 z-10 shrink-0">
+        <div class="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-3">
+            <h1 class="text-lg md:text-2xl font-bold text-slate-800 flex items-center gap-2">
+                <span>🔍</span> KNN 분류 (K-최근접 이웃)
+            </h1>
+            <div class="flex items-center gap-3">
+                <!-- K값 입력 필드 -->
+                <div class="flex items-center bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 shadow-inner">
+                    <label for="k-input" class="text-sm font-bold text-indigo-800 mr-2">이웃 수 (K) :</label>
+                    <input type="number" id="k-input" min="1" max="15" step="2" value="3" 
+                           class="w-16 bg-white border border-indigo-300 text-center rounded text-indigo-900 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 text-base py-0.5">
+                    <span class="text-xs text-indigo-600 ml-1">명</span>
+                </div>
+                <button id="reset-btn" class="bg-slate-100 text-slate-600 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-bold transition-colors text-sm border border-slate-300 shadow-sm">
+                    🔄 초기화
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow flex flex-col max-w-4xl mx-auto w-full p-3 md:p-4 gap-3 md:gap-4 h-full relative">
+        
+        <!-- 설명 패널 -->
+        <div class="bg-white border-2 border-indigo-100 rounded-xl p-4 shadow-sm shrink-0 flex flex-col gap-3">
+            <div class="flex items-center gap-2 flex-wrap">
+                <span id="step-badge" class="inline-block bg-indigo-100 text-indigo-700 text-xs md:text-sm font-bold px-2 py-1 rounded">
+                    1단계: 초기 상태
+                </span>
+                <div class="flex gap-2 text-xs font-semibold">
+                    <span class="text-red-500 bg-red-50 px-2 py-1 rounded border border-red-100 flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span> 그룹 A (빨강)</span>
+                    <span class="text-blue-500 bg-blue-50 px-2 py-1 rounded border border-blue-100 flex items-center gap-1"><span class="w-2 h-2 bg-blue-500 inline-block"></span> 그룹 B (파랑)</span>
+                </div>
+            </div>
+            
+            <p id="instruction-text" class="text-sm md:text-base font-semibold text-slate-700 leading-relaxed min-h-[2.5rem]">
+                준비되었습니다. 빈 캔버스 공간을 터치하여 <span class="text-slate-500 bg-slate-100 px-1 rounded font-bold">새로운 데이터(?)</span>를 추가해보세요.
+            </p>
+        </div>
+
+        <!-- 캔버스 영역 -->
+        <div class="relative w-full flex-grow bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <canvas id="graph-canvas" class="absolute top-0 left-0 w-full h-full cursor-crosshair"></canvas>
+            
+            <!-- 다수결 결과 말풍선 (초기 숨김) -->
+            <div id="vote-result" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white/95 backdrop-blur-sm border-2 border-slate-300 px-4 py-2 rounded-xl shadow-xl font-bold text-center hidden pointer-events-none transition-all z-10">
+                <!-- 동적으로 채워짐 -->
+            </div>
+        </div>
+
+        <!-- 하단 컨트롤 버튼 영역 -->
+        <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-sm shrink-0 flex items-center justify-center gap-3">
+            <button id="prev-btn" class="flex-1 max-w-[200px] bg-slate-200 text-slate-700 hover:bg-slate-300 py-3 rounded-xl font-bold transition-colors text-sm md:text-base flex items-center justify-center gap-1 shadow-sm" disabled>
+                <span class="text-lg leading-none">👈</span> 이전 단계
+            </button>
+            <button id="next-btn" class="flex-1 max-w-[200px] bg-indigo-600 text-white hover:bg-indigo-700 py-3 rounded-xl font-bold transition-colors shadow-md text-sm md:text-base flex items-center justify-center gap-1" disabled>
+                다음 단계 <span class="text-lg leading-none">👉</span>
+            </button>
+        </div>
+    </main>
+
+    <script>
+        const canvas = document.getElementById('graph-canvas');
+        const ctx = canvas.getContext('2d');
+        const prevBtn = document.getElementById('prev-btn');
+        const nextBtn = document.getElementById('next-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const kInput = document.getElementById('k-input');
+        const instructionText = document.getElementById('instruction-text');
+        const stepBadge = document.getElementById('step-badge');
+        const voteResult = document.getElementById('vote-result');
+
+        const PHASES = {
+            STEP1: 'STEP1',       // 초기 상태 (점 추가 대기)
+            STEP2: 'STEP2',       // 미지의 점 추가됨
+            STEP3: 'STEP3',       // 레이더 및 전체 거리 계산
+            STEP4: 'STEP4',       // 가장 가까운 K개 연결
+            STEP5: 'STEP5'        // 투표 및 색상 변경
+        };
+
+        const TEXTS = {
+            [PHASES.STEP1]: "빈 캔버스를 터치하여 <span class='text-slate-500 bg-slate-100 px-1 rounded font-bold'>새로운 미지의 데이터(?)</span>를 추가해보세요.",
+            [PHASES.STEP2]: "새로운 데이터가 추가되었습니다! <br class='md:hidden'>우측 하단의 <b>[다음 단계]</b>를 눌러 분류를 시작해봅시다.",
+            [PHASES.STEP3]: "레이더망을 펼쳐 <span class='font-bold text-slate-800 border-b-2 border-slate-400'>모든 데이터 사이의 거리</span>를 계산합니다.",
+            [PHASES.STEP4]: `거리순으로 <span class='font-bold text-indigo-600 border-b-2 border-indigo-400'>가장 가까운 이웃 K명</span>을 찾아 선으로 연결합니다.`,
+            [PHASES.STEP5]: "<span class='font-bold text-slate-800 text-lg'>다수결 투표!</span> 가장 많은 그룹으로 최종 분류되었습니다. <br class='md:hidden'>(새로운 점을 계속 추가할 수 있습니다)"
+        };
+
+        const COLORS = { 
+            RED: '#ef4444', 
+            BLUE: '#3b82f6', 
+            UNKNOWN: '#94a3b8',
+            RADAR: 'rgba(99, 102, 241, 0.2)', // indigo-500
+            LINE_ALL: 'rgba(148, 163, 184, 0.3)', // slate-400
+            LINE_KNN: '#6366f1' // indigo-500
+        };
+
+        let canvasWidth, canvasHeight;
+        let stateHistory = [];
+        
+        let currentState = {
+            phase: PHASES.STEP1,
+            points: [], 
+            unknownPoint: null, 
+            kValue: 3,
+            radarRadius: 0
+        };
+
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvasWidth = rect.width;
+            canvasHeight = rect.height;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = canvasWidth * dpr;
+            canvas.height = canvasHeight * dpr;
+            ctx.scale(dpr, dpr);
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        function generateBaseData() {
+            const pts = [];
+            const numPointsPerClass = 18;
+            
+            // 그룹 A (Red, label:1)
+            for(let i=0; i<numPointsPerClass; i++) {
+                pts.push({
+                    x: 0.15 + Math.random() * 0.45,
+                    y: 0.35 + Math.random() * 0.55,
+                    label: 1
+                });
+            }
+            // 그룹 B (Blue, label:0)
+            for(let i=0; i<numPointsPerClass; i++) {
+                pts.push({
+                    x: 0.4 + Math.random() * 0.45,
+                    y: 0.1 + Math.random() * 0.5,
+                    label: 0
+                });
+            }
+            return pts;
+        }
+
+        function resetAll() {
+            stateHistory = [];
+            currentState = {
+                phase: PHASES.STEP1,
+                points: generateBaseData(),
+                unknownPoint: null,
+                kValue: parseInt(kInput.value),
+                radarRadius: 0
+            };
+            voteResult.classList.add('hidden');
+            updateUI();
+        }
+
+        function saveState() {
+            // 현재 상태를 깊은 복사하여 히스토리에 저장
+            stateHistory.push(JSON.parse(JSON.stringify(currentState)));
+        }
+
+        canvas.addEventListener('pointerdown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+            const mx = sx / canvasWidth;
+            const my = sy / canvasHeight;
+
+            // 이미 투표가 완료된 상태에서 캔버스를 누르면, 이전 미지의 점을 확정시키고 초기화
+            if (currentState.phase === PHASES.STEP5) {
+                saveState();
+                currentState.points.push({
+                    x: currentState.unknownPoint.x,
+                    y: currentState.unknownPoint.y,
+                    label: currentState.unknownPoint.resultLabel
+                });
+                currentState.unknownPoint = null;
+                currentState.phase = PHASES.STEP1;
+            }
+
+            // 새로운 점 찍기 (STEP1 상태일 때)
+            if (currentState.phase === PHASES.STEP1) {
+                saveState();
+                
+                // 입력된 K값을 가져와 검증 및 적용
+                let parsedK = parseInt(kInput.value);
+                if (isNaN(parsedK) || parsedK < 1) parsedK = 1;
+                currentState.kValue = parsedK;
+
+                currentState.unknownPoint = {
+                    x: mx, 
+                    y: my,
+                    distances: [],
+                    resultLabel: null
+                };
+                currentState.phase = PHASES.STEP2;
+                currentState.radarRadius = 0;
+                voteResult.classList.add('hidden');
+                updateUI();
+            }
+        });
+
+        // k값 입력 시 즉시 상태 반영 (단, STEP1, STEP2 에서만)
+        kInput.addEventListener('change', () => {
+            let val = parseInt(kInput.value);
+            if (val < 1) { val = 1; kInput.value = 1; }
+            if (val % 2 === 0) {
+                // 다수결을 위해 홀수 권장 (강제는 안하지만 step을 2로 줌)
+            }
+            if(currentState.phase === PHASES.STEP1 || currentState.phase === PHASES.STEP2) {
+                currentState.kValue = val;
+            }
+        });
+
+        function goNext() {
+            if (!currentState.unknownPoint) return;
+            
+            saveState();
+            
+            switch(currentState.phase) {
+                case PHASES.STEP2:
+                    // 미지의 점 -> 거리 계산 (레이더 확장)
+                    currentState.unknownPoint.distances = currentState.points.map((p, idx) => {
+                        // 픽셀 단위로 정확한 거리를 계산하도록 수정 (화면 비율 왜곡 방지)
+                        const px = p.x * canvasWidth;
+                        const py = p.y * canvasHeight;
+                        const ux = currentState.unknownPoint.x * canvasWidth;
+                        const uy = currentState.unknownPoint.y * canvasHeight;
+                        const dist = Math.hypot(px - ux, py - uy);
+                        return { idx, dist, label: p.label };
+                    });
+                    currentState.radarRadius = 0; // 레이더 애니메이션 시작
+                    currentState.phase = PHASES.STEP3;
+                    break;
+                    
+                case PHASES.STEP3:
+                    // 모든 거리 계산 -> K개 이웃 찾기
+                    currentState.unknownPoint.distances.sort((a, b) => a.dist - b.dist);
+                    
+                    for(let i=0; i<currentState.unknownPoint.distances.length; i++) {
+                        currentState.unknownPoint.distances[i].isNeighbor = (i < currentState.kValue);
+                    }
+                    currentState.phase = PHASES.STEP4;
+                    break;
+                    
+                case PHASES.STEP4:
+                    // K개 이웃 -> 다수결 투표 결과 적용
+                    let countRed = 0;
+                    let countBlue = 0;
+                    
+                    // 예외 처리: 데이터 수보다 K가 크면 데이터 수만큼만 투표
+                    const actualK = Math.min(currentState.kValue, currentState.points.length);
+                    for(let i=0; i<actualK; i++) {
+                        if(currentState.unknownPoint.distances[i].label === 1) countRed++;
+                        else countBlue++;
+                    }
+                    
+                    // 동점일 경우 기본적으로 Red(1) 승리 처리 (혹은 무작위지만 여기선 단순화)
+                    currentState.unknownPoint.resultLabel = (countRed >= countBlue) ? 1 : 0;
+                    currentState.phase = PHASES.STEP5;
+                    
+                    // 결과 말풍선 세팅
+                    const colorClass = currentState.unknownPoint.resultLabel === 1 ? 'text-red-600' : 'text-blue-600';
+                    const groupName = currentState.unknownPoint.resultLabel === 1 ? '그룹 A (빨강)' : '그룹 B (파랑)';
+                    voteResult.innerHTML = `투표 결과<br><span class="text-sm font-medium text-slate-500">빨강(${countRed}) vs 파랑(${countBlue})</span><br><span class="${colorClass} text-lg mt-1 block">${groupName} 판정!</span>`;
+                    voteResult.classList.remove('hidden');
+                    
+                    // 말풍선을 점 근처에 배치
+                    const px = currentState.unknownPoint.x * canvasWidth;
+                    const py = currentState.unknownPoint.y * canvasHeight;
+                    voteResult.style.left = `${px}px`;
+                    voteResult.style.top = `${py - 70}px`; // 점보다 살짝 위에
+                    break;
+            }
+            updateUI();
+        }
+
+        function goPrev() {
+            if (stateHistory.length === 0) return;
+            // 가장 최신 과거 상태 복원
+            currentState = stateHistory.pop();
+            
+            // K 입력창 동기화
+            kInput.value = currentState.kValue;
+            
+            // 투표 결과창 숨기기
+            if(currentState.phase !== PHASES.STEP5) {
+                voteResult.classList.add('hidden');
+            }
+            
+            updateUI();
+        }
+
+        function updateUI() {
+            // 설명 텍스트 (K값 동적 반영)
+            let txt = TEXTS[currentState.phase];
+            if(currentState.phase === PHASES.STEP4) {
+                txt = `거리순으로 <span class='font-bold text-indigo-600 border-b-2 border-indigo-400'>가장 가까운 이웃 ${currentState.kValue}명</span>을 찾아 선으로 연결합니다.`;
+            }
+            instructionText.innerHTML = txt;
+            
+            // 뱃지 업데이트
+            const stepNumber = currentState.phase.replace('STEP', '');
+            let phaseName = "";
+            if(stepNumber === '1') phaseName = "초기 상태";
+            else if(stepNumber === '2') phaseName = "데이터 추가";
+            else if(stepNumber === '3') phaseName = "거리 탐색";
+            else if(stepNumber === '4') phaseName = "이웃 찾기 (K명)";
+            else if(stepNumber === '5') phaseName = "분류 완료";
+            
+            stepBadge.innerText = `${stepNumber}단계: ${phaseName}`;
+
+            // 완료 상태 색상 변경
+            if(currentState.phase === PHASES.STEP5) {
+                stepBadge.classList.replace('bg-indigo-100', 'bg-emerald-100');
+                stepBadge.classList.replace('text-indigo-700', 'text-emerald-700');
+            } else {
+                stepBadge.classList.replace('bg-emerald-100', 'bg-indigo-100');
+                stepBadge.classList.replace('text-emerald-700', 'text-indigo-700');
+            }
+
+            // 컨트롤 바 활성/비활성 제어
+            prevBtn.disabled = (stateHistory.length === 0);
+            nextBtn.disabled = (currentState.phase === PHASES.STEP1 || currentState.phase === PHASES.STEP5);
+            
+            // 입력칸은 준비/추가 단계에서만 수정 가능
+            kInput.disabled = (currentState.phase !== PHASES.STEP1 && currentState.phase !== PHASES.STEP2);
+        }
+
+        function drawPoint(x, y, label, isUnknown = false, size = 6) {
+            const px = x * canvasWidth;
+            const py = y * canvasHeight;
+            
+            ctx.beginPath();
+            if (isUnknown) {
+                // 미지의 점 (물음표 원)
+                ctx.arc(px, py, size + 2, 0, Math.PI * 2);
+                ctx.fillStyle = COLORS.UNKNOWN;
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('?', px, py);
+            } else {
+                if (label === 1) { // 빨강 (원)
+                    ctx.arc(px, py, size, 0, Math.PI * 2);
+                    ctx.fillStyle = COLORS.RED;
+                } else { // 파랑 (사각형)
+                    ctx.rect(px - size, py - size, size * 2, size * 2);
+                    ctx.fillStyle = COLORS.BLUE;
+                }
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+        }
+
+        function renderLoop() {
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            // 1. 기존 데이터 그리기
+            currentState.points.forEach(p => drawPoint(p.x, p.y, p.label));
+
+            // 2. 미지의 점 및 애니메이션 그리기
+            if (currentState.unknownPoint) {
+                const ux = currentState.unknownPoint.x;
+                const uy = currentState.unknownPoint.y;
+                const spx = ux * canvasWidth;
+                const spy = uy * canvasHeight;
+
+                // 단계 3: 레이더 확장 및 모든 선 그리기
+                if (currentState.phase === PHASES.STEP3) {
+                    // 레이더 반경 증가 애니메이션
+                    const maxDist = Math.sqrt(canvasWidth**2 + canvasHeight**2);
+                    if (currentState.radarRadius < maxDist) {
+                        currentState.radarRadius += (maxDist - currentState.radarRadius) * 0.05 + 2;
+                    }
+                    
+                    ctx.beginPath();
+                    ctx.arc(spx, spy, currentState.radarRadius, 0, Math.PI * 2);
+                    ctx.fillStyle = COLORS.RADAR;
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    // 모든 점으로 희미한 선 긋기
+                    currentState.unknownPoint.distances.forEach(d => {
+                        const target = currentState.points[d.idx];
+                        const tx = target.x * canvasWidth;
+                        const ty = target.y * canvasHeight;
+                        
+                        // 레이더 반경 안에 들어온 선만 그리기
+                        const pixelDist = Math.hypot(tx - spx, ty - spy);
+                        if (pixelDist <= currentState.radarRadius) {
+                            ctx.beginPath();
+                            ctx.moveTo(spx, spy);
+                            ctx.lineTo(tx, ty);
+                            ctx.strokeStyle = COLORS.LINE_ALL;
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                    });
+                }
+
+                // 단계 4 & 5: K개 이웃 강조 선 그리기
+                if (currentState.phase === PHASES.STEP4 || currentState.phase === PHASES.STEP5) {
+                    // 이웃을 감싸는 점선 원 그리기 (정확히 K번째 이웃의 거리까지만 반경 설정)
+                    const actualK = Math.min(currentState.kValue, currentState.points.length);
+                    if (actualK > 0) {
+                        // 픽셀 단위로 정확히 계산된 거리를 반경으로 사용
+                        const pixelRadius = currentState.unknownPoint.distances[actualK - 1].dist;
+                        
+                        ctx.beginPath();
+                        // 점을 살짝 덮을 수 있도록 반경에 여유(padding) +8 추가
+                        ctx.arc(spx, spy, pixelRadius + 8, 0, Math.PI * 2);
+                        ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)';
+                        ctx.setLineDash([5, 5]);
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                        ctx.setLineDash([]); // 원상복구
+                        ctx.fillStyle = 'rgba(99, 102, 241, 0.05)';
+                        ctx.fill();
+                    }
+
+                    // K개 이웃에게 진한 선 긋기
+                    currentState.unknownPoint.distances.forEach(d => {
+                        if (d.isNeighbor) {
+                            const target = currentState.points[d.idx];
+                            ctx.beginPath();
+                            ctx.moveTo(spx, spy);
+                            ctx.lineTo(target.x * canvasWidth, target.y * canvasHeight);
+                            
+                            // 투표 완료 시 같은 편인 선을 강조
+                            if (currentState.phase === PHASES.STEP5) {
+                                ctx.strokeStyle = (d.label === currentState.unknownPoint.resultLabel) ? 
+                                    (d.label === 1 ? 'rgba(239,68,68,0.7)' : 'rgba(59,130,246,0.7)') : 
+                                    'rgba(148, 163, 184, 0.3)';
+                                ctx.lineWidth = (d.label === currentState.unknownPoint.resultLabel) ? 3 : 1;
+                            } else {
+                                ctx.strokeStyle = COLORS.LINE_KNN;
+                                ctx.lineWidth = 2;
+                            }
+                            ctx.stroke();
+                        }
+                    });
+                }
+
+                // 미지의 점 본체 그리기
+                if (currentState.phase === PHASES.STEP5) {
+                    // 결과가 정해지면 해당 모양으로 변신
+                    drawPoint(ux, uy, currentState.unknownPoint.resultLabel, false, 9);
+                    
+                    // 후광
+                    ctx.beginPath();
+                    ctx.arc(spx, spy, 16, 0, Math.PI * 2);
+                    ctx.strokeStyle = currentState.unknownPoint.resultLabel === 1 ? 'rgba(239,68,68,0.5)' : 'rgba(59,130,246,0.5)';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                } else {
+                    drawPoint(ux, uy, null, true, 7);
+                }
+            }
+
+            requestAnimationFrame(renderLoop);
+        }
+
+        nextBtn.addEventListener('click', goNext);
+        prevBtn.addEventListener('click', goPrev);
+        resetBtn.addEventListener('click', resetAll);
+
+        window.onload = () => {
+            resizeCanvas();
+            resetAll();
+            renderLoop();
+        };
+
+    </script>
+</body>
+</html>
